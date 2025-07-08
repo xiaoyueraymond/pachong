@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from urllib.parse import quote, urlencode
-import bnjianyiduijiankong
+
 import requests
 from bs4 import BeautifulSoup
 
@@ -20,7 +20,7 @@ from bs4 import BeautifulSoup
 # 过滤列表,存在以下字符串时,不推送邮件
 filterList = ["测试", "测试"]
 # 检测间隔(秒)
-sleepTime = 60
+sleepTime = 10
 # 数据存放位置,无需改动
 folder = "data/虚拟币公告"
 # 日志时间格式化
@@ -225,11 +225,11 @@ def htx():
 
 
 # ================================================  MEXC  ================================================
-
+import re
 
 def mexc():
     dir = folder + "/mexc"
-    url = "https://www.mexc.com/help/announce/api/zh-TW/section/360000254192/articles?page=1&perPage=20"
+    url = "https://www.mexc.com/help/announce/api/zh-TW/section/360000254192/articles?page=2&perPage=20"
     res = requests.get(url, proxies=proxies)
 
     if res.status_code != 200:
@@ -243,22 +243,59 @@ def mexc():
     info = json.loads(res.text)
 
     articles = info["data"]["results"]
-    articles = sorted(  # 存在置顶问题,需要重新排序
-        articles, key=lambda article: article["updateTime"], reverse=True
-    )
+    print(articles)
+    for i in range(len(articles)):
+        if "首發上線" in articles[i]["title"]:
+            print('https://www.mexc.com/zh-TW/support/articles/'+ str(articles[i]["id"]),articles[i]["title"])
+
+
+# ================================================  GATE  ================================================
+
+
+def gate():
+    dir = folder + "/gate"
+    url = "https://www.gate.io/zh/announcements/newlisted"
+    res = requests.get(url, proxies=proxies)
+
+    if res.status_code != 200:
+        print(
+            "["
+            + get_beijing_time().strftime(timeFormat)
+            + "] [ERROR] GATE访问状态码: "
+            + res.status_code
+        )
+    html = BeautifulSoup(res.text, "html.parser")
+
+    data = html.select(".article-list-content .article-list-item")
+
+    articles = []
+
+    for item in data:
+        a = item.select_one(".article-list-item-content a")
+        itemUrl = "https://www.gate.io" + a.attrs["href"]
+        idSp = itemUrl.split("/")
+        articles.append(
+            {
+                "id": idSp[idSp.__len__() - 1],
+                "title": a.get_text().strip(),
+                "url": itemUrl,
+                "date": item.select_one(
+                    "span[class='article-list-info-timer article-list-item-info-item']"
+                )
+                .get_text()
+                .strip(),
+            }
+        )
 
     filePath = dir + "/history.json"
     if os.path.exists(filePath):
         with open(filePath, "r", encoding="utf-8") as file:
             history = json.loads(file.read())
         if articles[0]["id"] != history[0]["id"]:
-            date = datetime.strptime(
-                articles[0]["updateTime"], "%Y-%m-%dT%H:%M:%SZ"
-            ).strftime(timeFormat)
+            date3 = get_beijing_time().strftime(timeFormat)
+            date = articles[0]["date"]
             title = articles[0]["title"]
-            link = "https://www.mexc.com/zh-TW/support/articles/" + str(
-                articles[0]["id"]
-            )
+            link = articles[0]["url"]
             isSend = True
             for name in filterList:
                 if name in title:
@@ -266,7 +303,7 @@ def mexc():
                     break
             if isSend:
                 send_email(
-                    "MEXC", "标题: " + title + "\n时间: " + date + "链接: " + link
+                    "GATE", "标题: "  + title + "\n时间: " + date   + "链接: " + link
                 )
             with open(filePath, "w", encoding="utf-8") as file:
                 file.write(json.dumps(articles, indent=4))
@@ -275,44 +312,6 @@ def mexc():
             os.makedirs(dir)
         with open(filePath, "w", encoding="utf-8") as file:
             file.write(json.dumps(articles, indent=4))
-
-
-# ================================================  GATE  ================================================
-
-
-def gate():
-    dir = folder + "/gate"
-    url = "https://www.gate.com/zh/announcements/newlisted"
-
-
-    headers = {
-    'user-agent':'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Mobile Safari/537.36'
-    }
-
-    #url 请求资源路径#params 参数
-    #kwargs 字典
-
-
-    response =requests.get(url=url,headers=headers)
-    content = response.text
-    tree = etree.HTML(content)
-    gate_list = tree.xpath('//p[@class="font-medium text-subtitle line-clamp-2"]/text()')
-    print(gate_list)
-    filePath = dir + ".txt"
-    existing_titles = set()
-    if os.path.exists(filePath):
-        with open(filePath, "r", encoding="utf-8") as file:
-            existing_titles = set(file.read().splitlines())
-
-    # 将新的标题写入文件并执行函数a
-    with open(filePath, "a", encoding="utf-8") as file:
-        for title in gate_list:
-            if title not in existing_titles:
-                beijing_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
-                file.write(f"{beijing_time}\n{title}\n")
-                existing_titles.add(title)  # 将新标题添加到已存在的标题集合
-                print(f'新增部分{title}')
-                send_email("gate", f"北京时间: {beijing_time}, 标题: {title}")
 
 
 def gate3():
@@ -381,57 +380,80 @@ def gate3():
 
 # ================================================  BITGET  ================================================
 
-from lxml import etree
 
 def bitget():
     dir = folder + "/bitget"
-    url = "https://www.bitget.cloud/zh-CN/support/sections/5955813039257"
-
-
-    headers = {
-    'user-agent':'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Mobile Safari/537.36'
+    url = "https://www.bitget.cloud/v1/cms/helpCenter/content/section/helpContentDetail"
+    params = {
+        "pageNum": 1,
+        "pageSize": 10,
+        "params": {
+            "sectionId": "5955813039257",
+            "languageId": 1,
+            "firstSearchTime": int(time.time() * 1000),
+        },
     }
+    res = requests.post(
+        url,
+        data=json.dumps(params),
+        headers={"Content-Type": "application/json"},
+        proxies=proxies,
+    )
 
-    #url 请求资源路径#params 参数
-    #kwargs 字典
+    if res.status_code != 200:
+        print(
+            "["
+            + get_beijing_time().strftime(timeFormat)
+            + "] [ERROR] BITGET访问状态码: "
+            + res.status_code
+        )
 
+    info = json.loads(res.text)
 
-    response =requests.get(url=url,headers=headers)
-    content = response.text
-    tree = etree.HTML(content)
-    bitget_list = tree.xpath('//a[@class="ArticleList_item_title__u3fLL"]/text()')
-    print(bitget_list)
-    filePath = dir + ".txt"
-    existing_titles = set()
+    articles = info["data"]["items"]
+
+    filePath = dir + "/history.json"
     if os.path.exists(filePath):
         with open(filePath, "r", encoding="utf-8") as file:
-            existing_titles = set(file.read().splitlines())
-
-    # 将新的标题写入文件并执行函数a
-    with open(filePath, "a", encoding="utf-8") as file:
-        for title in bitget_list:
-            if title not in existing_titles:
-                beijing_time = get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
-                file.write(f"{beijing_time}\n{title}\n")
-                existing_titles.add(title)  # 将新标题添加到已存在的标题集合
-                print(f'新增部分{title}')
-                send_email("BITGET", f"北京时间: {beijing_time}, 标题: {title}")
+            history = json.loads(file.read())
+        if articles[0]["contentId"] != history[0]["contentId"]:
+            date = date = time.strftime(
+                "%Y-%m-%d %H:%M:%S",
+                time.localtime(int(articles[0]["showTime"]) / 1000),
+            )
+            title = articles[0]["title"]
+            link = "https://www.bitget.cloud/zh-CN/support/articles/" + str(
+                articles[0]["contentId"]
+            )
+            isSend = True
+            for name in filterList:
+                if name in title:
+                    isSend = False
+                    break
+            if isSend:
+                send_email(
+                    "BITGET", "标题: " + title + "\n时间: " + date + "链接: " + link
+                )
+            with open(filePath, "w", encoding="utf-8") as file:
+                file.write(json.dumps(articles, indent=4))
+    else:
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+        with open(filePath, "w", encoding="utf-8") as file:
+            file.write(json.dumps(articles, indent=4))
 
 
 def main():
-    while True:
-        print("[" + get_beijing_time().strftime(timeFormat) + "] [INFO] 开始检测")
-        threading.Thread(target=bnjianyiduijiankong.check_new_markets).start()
-        threading.Thread(target=okx).start()
-        threading.Thread(target=htx).start()
-        #threading.Thread(target=mexc).start()
-        threading.Thread(target=gate).start()
-        #threading.Thread(target=gate3).start()
-        threading.Thread(target=bitget).start()
-        time.sleep(sleepTime)
+    print("[" + get_beijing_time().strftime(timeFormat) + "] [INFO] 开始检测")
+    #threading.Thread(target=binance).start()
+    # threading.Thread(target=okx).start()
+    # threading.Thread(target=htx).start()
+    threading.Thread(target=mexc).start()
+    #threading.Thread(target=gate).start()
+    #threading.Thread(target=gate3).start()
+    # threading.Thread(target=bitget).start()
+    time.sleep(sleepTime)
 
-
-#目前是监控okx htx bitget 应该是60s监控一次
 
 # 测试使用
 def main2():
@@ -440,9 +462,6 @@ def main2():
         threading.Thread(target=gate3).start()
         time.sleep(sleepTime)
 
-
-#cd /www/wwwroot/musk/test/
-#screen -S demo1 python3  demo1.py
 
 if __name__ == "__main__":
     main()
